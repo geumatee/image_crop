@@ -10,6 +10,8 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import java.io.File;
@@ -21,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -41,10 +44,12 @@ public final class ImageCropPlugin implements MethodCallHandler, PluginRegistry.
     private final Activity activity;
     private Result permissionRequestResult;
     private ExecutorService executor;
+    private Executor mainThreadExecutor;
 
     private ImageCropPlugin(Activity activity) {
         this.activity = activity;
         this.executor = Executors.newCachedThreadPool();
+        this.mainThreadExecutor = new UiThreadExecutor();
     }
 
     public static void registerWith(Registrar registrar) {
@@ -87,13 +92,23 @@ public final class ImageCropPlugin implements MethodCallHandler, PluginRegistry.
             public void run() {
                 File srcFile = new File(path);
                 if (!srcFile.exists()) {
-                    result.error("INVALID", "Image source cannot be opened", null);
+                    mainThreadExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.error("INVALID", "Image source cannot be opened", null);
+                        }
+                    });
                     return;
                 }
 
                 Bitmap srcBitmap = BitmapFactory.decodeFile(path, null);
                 if (srcBitmap == null) {
-                    result.error("INVALID", "Image source cannot be decoded", null);
+                    mainThreadExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.error("INVALID", "Image source cannot be decoded", null);
+                        }
+                    });
                     return;
                 }
 
@@ -139,11 +154,21 @@ public final class ImageCropPlugin implements MethodCallHandler, PluginRegistry.
 //                canvas.drawBitmap(srcBitmap, transformations, paint);
 
                 try {
-                    File dstFile = createTemporaryImageFile();
+                    final File dstFile = createTemporaryImageFile();
                     compressBitmap(dstBitmap, dstFile);
-                    result.success(dstFile.getAbsolutePath());
-                } catch (IOException e) {
-                    result.error("INVALID", "Image could not be saved", e);
+                    mainThreadExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.success(dstFile.getAbsolutePath());
+                        }
+                    });
+                } catch (final IOException e) {
+                    mainThreadExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.error("INVALID", "Image could not be saved", e);
+                        }
+                    });
                 } finally {
                     canvas.setBitmap(null);
                     dstBitmap.recycle();
@@ -159,7 +184,12 @@ public final class ImageCropPlugin implements MethodCallHandler, PluginRegistry.
             public void run() {
                 File srcFile = new File(path);
                 if (!srcFile.exists()) {
-                    result.error("INVALID", "Image source cannot be opened", null);
+                    mainThreadExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.error("INVALID", "Image source cannot be opened", null);
+                        }
+                    });
                     return;
                 }
 
@@ -170,7 +200,12 @@ public final class ImageCropPlugin implements MethodCallHandler, PluginRegistry.
 
                 Bitmap bitmap = BitmapFactory.decodeFile(path, bitmapOptions);
                 if (bitmap == null) {
-                    result.error("INVALID", "Image source cannot be decoded", null);
+                    mainThreadExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.error("INVALID", "Image source cannot be decoded", null);
+                        }
+                    });
                     return;
                 }
 
@@ -182,12 +217,22 @@ public final class ImageCropPlugin implements MethodCallHandler, PluginRegistry.
                 }
 
                 try {
-                    File dstFile = createTemporaryImageFile();
+                    final File dstFile = createTemporaryImageFile();
                     compressBitmap(bitmap, dstFile);
                     copyExif(srcFile, dstFile);
-                    result.success(dstFile.getAbsolutePath());
-                } catch (IOException e) {
-                    result.error("INVALID", "Image could not be saved", e);
+                    mainThreadExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.success(dstFile.getAbsolutePath());
+                        }
+                    });
+                } catch (final IOException e) {
+                    mainThreadExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.error("INVALID", "Image could not be saved", e);
+                        }
+                    });
                 } finally {
                     bitmap.recycle();
                 }
@@ -232,16 +277,26 @@ public final class ImageCropPlugin implements MethodCallHandler, PluginRegistry.
             public void run() {
                 File file = new File(path);
                 if (!file.exists()) {
-                    result.error("INVALID", "Image source cannot be opened", null);
+                    mainThreadExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            result.error("INVALID", "Image source cannot be opened", null);
+                        }
+                    });
                     return;
                 }
 
                 ImageOptions options = decodeImageOptions(path);
-                Map<String, Object> properties = new HashMap<>();
+                final Map<String, Object> properties = new HashMap<>();
                 properties.put("width", options.getWidth());
                 properties.put("height", options.getHeight());
 
-                result.success(properties);
+                mainThreadExecutor.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        result.success(properties);
+                    }
+                });
             }
         });
     }
@@ -371,5 +426,14 @@ public final class ImageCropPlugin implements MethodCallHandler, PluginRegistry.
         public boolean isRotated() {
             return degrees != 0;
         }
+    }
+}
+
+class UiThreadExecutor implements Executor {
+    private final Handler mHandler = new Handler(Looper.getMainLooper());
+
+    @Override
+    public void execute(Runnable command) {
+        mHandler.post(command);
     }
 }

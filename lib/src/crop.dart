@@ -84,6 +84,8 @@ class CropState extends State<Crop> with TickerProviderStateMixin, Drag {
 
   double get scale => _area.shortestSide / _scale;
 
+  ImageStreamListener _listener;
+
   Rect get area {
     return _view.isEmpty
         ? null
@@ -113,11 +115,12 @@ class CropState extends State<Crop> with TickerProviderStateMixin, Drag {
     )..addListener(() => setState(() {}));
     _settleController = AnimationController(vsync: this)
       ..addListener(_settleAnimationChanged);
+    _listener = ImageStreamListener(_updateImage);
   }
 
   @override
   void dispose() {
-    _imageStream?.removeListener(_updateImage);
+    _imageStream?.removeListener(_listener);
     _activeController.dispose();
     _settleController.dispose();
     super.dispose();
@@ -155,8 +158,8 @@ class CropState extends State<Crop> with TickerProviderStateMixin, Drag {
     final oldImageStream = _imageStream;
     _imageStream = widget.image.resolve(createLocalImageConfiguration(context));
     if (_imageStream.key != oldImageStream?.key || force) {
-      oldImageStream?.removeListener(_updateImage);
-      _imageStream.addListener(_updateImage);
+      oldImageStream?.removeListener(_listener);
+      _imageStream.addListener(_listener);
     }
   }
 
